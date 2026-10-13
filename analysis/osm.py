@@ -36,6 +36,7 @@ OUT = ROOT / "web" / "public" / "data" / "osm.json"
 UA = "LaunchLab-Bangalore student project (github.com/divyabasavraj/launchlab-bangalore)"
 BBOX = (12.80, 77.40, 13.15, 77.80)  # south, west, north, east
 RADIUS_KM = 1.2
+MAX_STALE_DAYS = 3  # some mirrors lag months behind; never publish their data as "today"
 SSL = ssl.create_default_context(cafile=certifi.where())
 OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter",
             "https://overpass.private.coffee/api/interpreter"]
@@ -70,23 +71,46 @@ def fetch_places(use_cache: bool) -> tuple[list[dict], str]:
     if use_cache and CACHE.exists() and time.time() - CACHE.stat().st_mtime < 86400:
         d = json.loads(CACHE.read_text())
         return d["elements"], d.get("osm3s", {}).get("timestamp_osm_base", "")
+    # Ask for the city in 4 quarters: small requests survive busy servers far better.
     s, w, n, e = BBOX
-    q = (f'[out:json][timeout:150];nwr["amenity"~"^(restaurant|fast_food|cafe|food_court|ice_cream|bar|pub|biergarten)$"]'
-         f"({s},{w},{n},{e});out center tags;")
-    body = urllib.parse.urlencode({"data": q}).encode()
-    for attempt in range(2):
-        for ep in OVERPASS:
-            try:
-                req = urllib.request.Request(ep, data=body, headers={"User-Agent": UA})
-                with urllib.request.urlopen(req, timeout=200, context=SSL) as r:
-                    d = json.load(r)
-                CACHE.parent.mkdir(parents=True, exist_ok=True)
-                CACHE.write_text(json.dumps(d))
-                return d["elements"], d.get("osm3s", {}).get("timestamp_osm_base", "")
-            except Exception as err:  # busy servers are common; try the next mirror
-                print(f"  {ep}: {err}")
-                time.sleep(10)
-    raise RuntimeError("all Overpass servers failed")
+    mid_lat, mid_lon = (s + n) / 2, (w + e) / 2
+    tiles = [(s, w, mid_lat, mid_lon), (s, mid_lon, mid_lat, e), (mid_lat, w, n, mid_lon), (mid_lat, mid_lon, n, e)]
+    elements, seen, stamp = [], set(), ""
+    for t in tiles:
+        q = ('[out:json][timeout:90];nwr["amenity"~"^(restaurant|fast_food|cafe|food_court|ice_cream|bar|pub|biergarten)$"]'
+             f"({t[0]},{t[1]},{t[2]},{t[3]});out center tags;")
+        body = urllib.parse.urlencode({"data": q}).encode()
+        d = None
+        for attempt in range(4):
+            for ep in OVERPASS:
+                try:
+                    req = urllib.request.Request(ep, data=body, headers={"User-Agent": UA})
+                    with urllib.request.urlopen(req, timeout=120, context=SSL) as r:
+                        got = json.load(r)
+                    ts = got.get("osm3s", {}).get("timestamp_osm_base", "")
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(ts.replace("Z", "+00:00"))).days if ts else 999
+                    if age > MAX_STALE_DAYS:
+                        print(f"  tile {t}: {ep}: data is {age} days old, skipping this mirror")
+                        continue
+                    d = got
+                    break
+                except Exception as err:  # busy servers are common; try the next mirror
+                    print(f"  tile {t}: {ep}: {err}")
+            if d:
+                break
+            time.sleep(30 * (attempt + 1))
+        if not d:
+            raise RuntimeError("all Overpass servers failed")
+        ts = d.get("osm3s", {}).get("timestamp_osm_base", "")
+        stamp = min(stamp, ts) if stamp else ts  # label with the oldest tile's date: always honest
+        for el in d["elements"]:
+            if (el["type"], el["id"]) not in seen:  # a place on a tile border comes back twice
+                seen.add((el["type"], el["id"]))
+                elements.append(el)
+        time.sleep(2)
+    CACHE.parent.mkdir(parents=True, exist_ok=True)
+    CACHE.write_text(json.dumps({"elements": elements, "osm3s": {"timestamp_osm_base": stamp}}))
+    return elements, stamp
 
 
 def geocode(areas: list[str]) -> dict[str, list[float]]:

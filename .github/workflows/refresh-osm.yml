@@ -2,7 +2,7 @@ name: Refresh live OpenStreetMap layer
 
 on:
   schedule:
-    - cron: "30 2 * * 1" # every Monday, 08:00 IST
+    - cron: "30 2 * * 1,4" # Monday and Thursday, 08:00 IST
   workflow_dispatch:
 
 permissions:
