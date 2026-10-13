@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { int, pct, rupees, stars } from "./format";
 import { buildInsights, changedField, describe, FIELD_LABEL, type Field } from "./insights";
+import { buildPlaybook, compareAreas } from "./playbook";
 import { predictPopular, predictRating } from "./predict";
 import type { Concept, Data } from "./types";
 
@@ -107,13 +108,14 @@ function Planner({ data }: { data: Data }) {
     area: defaultArea, cuisines: ["North Indian", "Chinese"], type: "Casual Dining", cost: 600,
     online: true, booking: false, outlets: 1, listings: ["Delivery", "Dine-out"],
   });
-  const [change, setChange] = useState<{ n: number; field: Field; from: string; to: string; before: [number, number]; after: [number, number] } | null>(null);
+  const [change, setChange] = useState<{ n: number; field: Field; from: string; to: string; before: [number, number]; after: [number, number]; why?: string } | null>(null);
   const update = (next: Concept) => {
     const field = changedField(c, next);
     if (field) {
       setChange({
         n: (change?.n ?? 0) + 1, field, from: describe(field, c), to: describe(field, next),
         before: [predictRating(m, c), predictPopular(m, c)], after: [predictRating(m, next), predictPopular(m, next)],
+        why: field === "area" ? compareAreas(data.market, c, next) : undefined,
       });
     }
     setC(next);
@@ -121,6 +123,8 @@ function Planner({ data }: { data: Data }) {
   const set = (patch: Partial<Concept>) => update({ ...c, ...patch });
   const insights = useMemo(() => buildInsights(data.market, c), [data.market, c]);
   const changedInsight = change ? insights.find((i) => i.field === change.field) : undefined;
+  const lateShare = data.reviews.themes.find((t) => t.theme.startsWith("Late delivery"))?.low ?? 0;
+  const playbook = useMemo(() => buildPlaybook(data.market, m, c, lateShare), [data.market, m, c, lateShare]);
   const toggleIn = (list: string[], v: string, max = 99) =>
     list.includes(v) ? list.filter((x) => x !== v) : list.length >= max ? list : [...list, v];
 
@@ -219,7 +223,7 @@ function Planner({ data }: { data: Data }) {
                 <Delta label="Popularity" a={change.before[1]} b={change.after[1]} fmt={(v) => pct(v)} unit="pts" scale={100} />
                 <Delta label="Rating" a={change.before[0]} b={change.after[0]} fmt={stars} unit="★" scale={1} digits={2} />
               </span>
-              {changedInsight && <span className="change-why">{changedInsight.detail}</span>}
+              {(change.why || changedInsight) && <span className="change-why">{change.why ?? changedInsight!.detail}</span>}
             </div>
           )}
           <div className="result-main">
@@ -250,6 +254,53 @@ function Planner({ data }: { data: Data }) {
             })}
           </ul>
           <p className="result-note">Click a lever to apply it. These show how similar restaurants performed, which is useful for comparing options but not a guarantee that the change alone causes the result.</p>
+        </div>
+      </div>
+
+      <div className="playbook" key={`pb-${change?.n ?? 0}`}>
+        <div className="pb-head">
+          <span className="pb-kicker">Marketing brief · updates with every change</span>
+          <p className="pb-situation">{playbook.situation}</p>
+        </div>
+        <div className="pb-grid">
+          <div>
+            <h4>What the marketing team should do</h4>
+            <ol className="pb-actions">
+              {playbook.actions.map((a) => (
+                <li key={a.title}>
+                  <span className={`prio ${a.priority === "High" ? "high" : ""}`}>{a.priority} priority</span>
+                  <b>{a.title}</b>
+                  <p>{a.why}</p>
+                </li>
+              ))}
+            </ol>
+          </div>
+          <div>
+            <h4>Where the business value is</h4>
+            <p className="pb-note">Changes the model predicts would most increase your chance of becoming popular, tested against your current plan. These are estimates from how similar restaurants performed, so validate them with a small test before committing budget.</p>
+            {playbook.opportunities.length === 0 ? (
+              <p className="pb-empty">Your current plan is already close to the best the model can find nearby. Focus on execution: taste, service, reviews.</p>
+            ) : (
+              <ul className="pb-opps">
+                {playbook.opportunities.map((o) => (
+                  <li key={o.lever}>
+                    <div className="opp-top">
+                      <b>{o.lever}</b>
+                      <button type="button" onClick={() => update(o.concept)}>Apply</button>
+                    </div>
+                    <div className="opp-bar" aria-hidden>
+                      <span className="from" style={{ width: `${o.from * 100}%` }} />
+                      <span className="gain" style={{ left: `${o.from * 100}%`, width: `${(o.to - o.from) * 100}%` }} />
+                    </div>
+                    <span className="opp-nums">
+                      Popularity {pct(o.from)} → <b>{pct(o.to)}</b> <em>▲ +{((o.to - o.from) * 100).toFixed(0)} pts</em>
+                      {" · "}Rating {stars(o.ratingFrom)} → {stars(o.ratingTo)} · {o.note}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
 
