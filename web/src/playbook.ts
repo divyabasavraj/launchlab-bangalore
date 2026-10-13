@@ -1,7 +1,7 @@
-import { bandOf } from "./insights";
+import { bandOf, FIX, gapCuisines, topComplaint } from "./insights";
 import { int, pct, rupees, stars } from "./format";
 import { predictPopular, predictRating } from "./predict";
-import type { Area, Concept, Market, ModelData } from "./types";
+import type { Area, Concept, Market, ModelData, Reviews } from "./types";
 
 type M = ModelData["model"];
 
@@ -47,7 +47,8 @@ export function compareAreas(mk: Market, from: Concept, to: Concept): string {
   return `${parts.join("; ")}. ${shift}`;
 }
 
-export function buildPlaybook(mk: Market, m: M, c: Concept, reviewLate: number): Playbook {
+export function buildPlaybook(mk: Market, m: M, c: Concept, rv: Reviews): Playbook {
+  const reviewLate = rv.themes.find((t) => t.theme.startsWith("Late delivery"))?.low ?? 0;
   const x = context(mk, c);
   const band = bandOf(c.cost);
   const ts = mk.type_stats[c.type];
@@ -87,6 +88,42 @@ export function buildPlaybook(mk: Market, m: M, c: Concept, reviewLate: number):
   if (c.online) {
     actions.push({ priority: "Medium", title: "Protect delivery ratings: packaging and delivery time",
       why: `Late delivery or long waits show up in ${pct(reviewLate, 0)} of 1–2★ reviews. A bad first delivery costs more than any campaign earns back.` });
+  }
+  // Cuisine-specific complaint: the most over-represented one across the chosen cuisines.
+  const comp = c.cuisines.map((q) => ({ q, k: topComplaint(rv, "by_cuisine", q) })).filter((x) => x.k)
+    .sort((a, b) => b.k!.lift - a.k!.lift)[0];
+  if (comp?.k) {
+    actions.push({ priority: comp.k.lift >= 1.5 ? "High" : "Medium", title: `Pre-empt the top ${comp.q} complaint: ${comp.k.theme.toLowerCase()}`,
+      why: `Unhappy ${comp.q} customers mention it ${comp.k.lift.toFixed(1)}× more than average (${pct(comp.k.share)} of 1–2★ reviews). Marketing move: ${FIX[comp.k.theme]}.` });
+  }
+  const gaps = x.area ? gapCuisines(mk, x.area, c.cuisines) : [];
+  if (gaps.length) {
+    actions.push({ priority: "Medium", title: `Fill a local gap: add ${gaps[0].q} to the menu`,
+      why: `${gaps[0].q} is under-represented in ${c.area} compared with the rest of Bangalore, and rates ${stars(gaps[0].s.rating ?? 0)} citywide. A few ${gaps[0].q} dishes give locals a reason to pick you over the usual options.` });
+  }
+  if (x.area) {
+    const nearby = x.area.costs.filter((v) => Math.abs(v - c.cost) <= 100).length / x.area.costs.length;
+    if (nearby >= 0.35) {
+      actions.push({ priority: "Medium", title: `Don't compete on price: ${pct(nearby)} of ${c.area} sits in your price slot`,
+        why: `That many restaurants price within ±₹100 of ${rupees(c.cost)}. Discounts just match everyone else; a combo, loyalty card or signature dish gives customers a reason that isn't price.` });
+    }
+  }
+  const tcomp = topComplaint(rv, "by_type", c.type);
+  if (tcomp && tcomp.lift >= 1.3 && tcomp.theme !== comp?.k?.theme) {
+    actions.push({ priority: "Medium", title: `${c.type} customers are sensitive to ${tcomp.theme.toLowerCase()}`,
+      why: `It comes up ${tcomp.lift.toFixed(1)}× more than average in bad ${c.type} reviews. Marketing move: ${FIX[tcomp.theme]}.` });
+  }
+  if (c.booking && (bk?.with ?? null) !== null) {
+    actions.push({ priority: "Medium", title: "Sell reservations: weekend dinners, birthdays and groups",
+      why: `At ${band}, places with booking average ${stars(bk!.with!)} and ${int(bk!.votes_with ?? 0)} votes vs ${stars(bk!.without ?? 0)} and ${int(bk!.votes_without ?? 0)} without. Promote booking slots on Zomato and Instagram to make the place feel in-demand.` });
+  }
+  if (c.outlets > 1) {
+    const ch = mk.by_chain.find((k) => k.kind === (c.outlets <= 5 ? "Small chain (2–5)" : "Large chain (6+)"));
+    actions.push({ priority: "Medium", title: `Market the brand, not the outlet: ${c.outlets} outlets share one reputation`,
+      why: `Chains of this size get ${int(ch?.median_votes ?? 0)} median votes, more visibility than independents, but no better ratings. Run city-wide campaigns and keep quality consistent, because one weak kitchen drags every outlet's rating.` });
+  } else {
+    actions.push({ priority: "Medium", title: "Tell the founder story: you have no brand recognition yet",
+      why: "Independents rate as well as chains but get far fewer votes. Local press, the founder's story and a push for the first 50 reviews are the cheapest ways to close that gap." });
   }
   actions.push({ priority: "Medium", title: "Make taste and service the brand promise, and answer every bad review",
     why: "Bad taste and rude service are the clearest differences between 1★ and 5★ reviews. Price complaints are just as common in good reviews, so discounts don't fix ratings." });
@@ -134,5 +171,7 @@ export function buildPlaybook(mk: Market, m: M, c: Concept, reviewLate: number):
   }
   opp.sort((a, b) => (b.to - b.from) - (a.to - a.from));
 
-  return { situation, actions: actions.slice(0, 5), opportunities: opp.slice(0, 4) };
+  const order = { High: 0, Medium: 1 };
+  actions.sort((a, b) => order[a.priority] - order[b.priority]);
+  return { situation, actions: actions.slice(0, 6), opportunities: opp.slice(0, 4) };
 }

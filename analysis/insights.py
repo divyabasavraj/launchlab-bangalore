@@ -77,6 +77,7 @@ def market(df: pd.DataFrame) -> dict:
             "online_share": float(g.online_order.mean()),
             "booking_share": float(g.book_table.mean()),
             "cuisine_counts": g.cuisines.explode().value_counts().to_dict(),
+            "type_counts": g.rest_types.explode().value_counts().to_dict(),
             # rating of each cuisine within this area (only when there are enough places)
             "cuisine_ratings": {c: round(float(v["mean"]), 2) for c, v in by_c.iterrows() if v["size"] >= 5},
         })
@@ -96,7 +97,15 @@ def market(df: pd.DataFrame) -> dict:
     by_l_all = df.explode("listed_in")
     listing_stats = {l: stats(g) for l, g in by_l_all.groupby("listed_in")}
 
-    # Table booking and chain size, compared within the same price band.
+    # How each cuisine does at each price band (for "your cuisine at your price").
+    cb = rated.explode("cuisines")
+    cuisine_band = {}
+    for (cu, b), g in cb.groupby(["cuisines", "band"]):
+        if len(g) >= 10 and cu in cuisine_stats:
+            cuisine_band.setdefault(cu, {})[b] = {"n": int(len(g)), "rating": round(float(g.rating.mean()), 3),
+                                                  "median_votes": float(g.votes.median())}
+
+    # Table booking, compared within the same price band.
     booking = []
     for b in order:
         g = rated[rated.band == b]
@@ -109,8 +118,7 @@ def market(df: pd.DataFrame) -> dict:
 
     return {
         "cuisine_stats": cuisine_stats, "type_stats": type_stats, "listing_stats": listing_stats,
-        "booking": booking,
-        "popular_share_overall": 0.25,
+        "booking": booking, "cuisine_band": cuisine_band,
         "totals": {"restaurants": int(len(df)), "rated": int(len(rated)), "areas": int(df.area.nunique()),
                    "median_cost": float(df.cost_for_two.median()), "mean_rating": float(rated.rating.mean()),
                    "online_share": float(df.online_order.mean()), "chains_share": float((df.outlets > 1).mean())},
@@ -120,13 +128,30 @@ def market(df: pd.DataFrame) -> dict:
     }
 
 
-def review_themes(reviews: pd.DataFrame) -> dict:
-    low = reviews[reviews.stars <= 2].text.str.lower()
-    high = reviews[reviews.stars >= 4].text.str.lower()
-    rows = []
-    for theme, pattern in THEMES.items():
-        rx = re.compile(pattern)
-        pl, ph = low.map(lambda t: bool(rx.search(t))).mean(), high.map(lambda t: bool(rx.search(t))).mean()
-        rows.append({"theme": theme, "low": float(pl), "high": float(ph)})
+def review_themes(reviews: pd.DataFrame, df: pd.DataFrame) -> dict:
+    text = reviews.text.str.lower()
+    flags = pd.DataFrame({t: text.str.contains(p.replace("(", "(?:"), regex=True) for t, p in THEMES.items()})
+    low, high = (reviews.stars <= 2).to_numpy(), (reviews.stars >= 4).to_numpy()
+    rows = [{"theme": t, "low": float(flags.loc[low, t].mean()), "high": float(flags.loc[high, t].mean())} for t in THEMES]
     rows.sort(key=lambda r: r["low"] - r["high"], reverse=True)
-    return {"n_low": int(len(low)), "n_high": int(len(high)), "n_reviews": int(len(reviews)), "themes": rows}
+
+    # The same, per cuisine and per format: what *their* unhappy customers say.
+    meta = df.set_index("key")[["cuisines", "rest_types"]]
+    joined = pd.concat([reviews[["key", "stars"]].reset_index(drop=True), flags.reset_index(drop=True)], axis=1)
+    joined = joined.join(meta, on="key")
+
+    def per_group(col: str) -> dict:
+        out = {}
+        ex = joined.explode(col)
+        for g, part in ex.groupby(col):
+            lo = part[part.stars <= 2]
+            if len(lo) < 150:
+                continue
+            hi = part[part.stars >= 4]
+            out[g] = {"n_low": int(len(lo)), "low_share": float(len(lo) / len(part)),
+                      "low": {t: round(float(lo[t].mean()), 4) for t in THEMES},
+                      "high": {t: round(float(hi[t].mean()), 4) for t in THEMES}}
+        return out
+
+    return {"n_low": int(low.sum()), "n_high": int(high.sum()), "n_reviews": int(len(reviews)), "themes": rows,
+            "low_share": float(low.mean()), "by_cuisine": per_group("cuisines"), "by_type": per_group("rest_types")}

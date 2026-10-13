@@ -31,6 +31,7 @@ export type Area = {
   online_share: number;
   booking_share: number;
   cuisine_counts: Record<string, number>;
+  type_counts: Record<string, number>;
   cuisine_ratings: Record<string, number>;
 };
 
@@ -62,14 +63,20 @@ export type Market = {
   cuisine_stats: Record<string, GroupStats>;
   type_stats: Record<string, GroupStats>;
   listing_stats: Record<string, GroupStats>;
+  cuisine_band: Record<string, Record<string, { n: number; rating: number; median_votes: number }>>;
   booking: { band: string; share: number; with: number | null; without: number | null; votes_with: number | null; votes_without: number | null }[];
 };
+
+export type GroupThemes = { n_low: number; low_share: number; low: Record<string, number>; high: Record<string, number> };
 
 export type Reviews = {
   n_low: number;
   n_high: number;
   n_reviews: number;
+  low_share: number;
   themes: { theme: string; low: number; high: number }[];
+  by_cuisine: Record<string, GroupThemes>;
+  by_type: Record<string, GroupThemes>;
 };
 
 export type Data = { market: Market; reviews: Reviews; model: ModelData };

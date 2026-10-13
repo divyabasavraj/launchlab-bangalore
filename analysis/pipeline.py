@@ -29,7 +29,7 @@ def main() -> None:
     print("market insights ...")
     market = insights.market(df)
     print("review themes ...")
-    themes = insights.review_themes(reviews)
+    themes = insights.review_themes(reviews, df)
     print("models (5-fold, grouped by brand) ...")
     models = model.run(df)
 

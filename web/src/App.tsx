@@ -108,7 +108,7 @@ function Planner({ data }: { data: Data }) {
     area: defaultArea, cuisines: ["North Indian", "Chinese"], type: "Casual Dining", cost: 600,
     online: true, booking: false, outlets: 1, listings: ["Delivery", "Dine-out"],
   });
-  const [change, setChange] = useState<{ n: number; field: Field; from: string; to: string; before: [number, number]; after: [number, number]; why?: string } | null>(null);
+  const [change, setChange] = useState<{ n: number; field: Field; from: string; to: string; before: [number, number]; after: [number, number]; why?: string; added: string[]; dropped: string[] } | null>(null);
   const update = (next: Concept) => {
     const field = changedField(c, next);
     if (field) {
@@ -116,15 +116,19 @@ function Planner({ data }: { data: Data }) {
         n: (change?.n ?? 0) + 1, field, from: describe(field, c), to: describe(field, next),
         before: [predictRating(m, c), predictPopular(m, c)], after: [predictRating(m, next), predictPopular(m, next)],
         why: field === "area" ? compareAreas(data.market, c, next) : undefined,
+        ...(() => {
+          const a = buildPlaybook(data.market, m, c, data.reviews).actions.map((x) => x.title);
+          const b = buildPlaybook(data.market, m, next, data.reviews).actions.map((x) => x.title);
+          return { added: b.filter((t) => !a.includes(t)), dropped: a.filter((t) => !b.includes(t)) };
+        })(),
       });
     }
     setC(next);
   };
   const set = (patch: Partial<Concept>) => update({ ...c, ...patch });
-  const insights = useMemo(() => buildInsights(data.market, c), [data.market, c]);
+  const insights = useMemo(() => buildInsights(data.market, data.reviews, c), [data.market, data.reviews, c]);
   const changedInsight = change ? insights.find((i) => i.field === change.field) : undefined;
-  const lateShare = data.reviews.themes.find((t) => t.theme.startsWith("Late delivery"))?.low ?? 0;
-  const playbook = useMemo(() => buildPlaybook(data.market, m, c, lateShare), [data.market, m, c, lateShare]);
+  const playbook = useMemo(() => buildPlaybook(data.market, m, c, data.reviews), [data.market, m, c, data.reviews]);
   const toggleIn = (list: string[], v: string, max = 99) =>
     list.includes(v) ? list.filter((x) => x !== v) : list.length >= max ? list : [...list, v];
 
@@ -224,6 +228,13 @@ function Planner({ data }: { data: Data }) {
                 <Delta label="Rating" a={change.before[0]} b={change.after[0]} fmt={stars} unit="★" scale={1} digits={2} />
               </span>
               {(change.why || changedInsight) && <span className="change-why">{change.why ?? changedInsight!.detail}</span>}
+              {(change.added.length > 0 || change.dropped.length > 0) && (
+                <span className="change-brief">
+                  <span className="cb-title">What changed in your marketing brief</span>
+                  {change.added.map((t) => <span key={t} className="cb add">＋ {t}</span>)}
+                  {change.dropped.map((t) => <span key={t} className="cb drop">－ {t}</span>)}
+                </span>
+              )}
             </div>
           )}
           <div className="result-main">
@@ -312,7 +323,10 @@ function Planner({ data }: { data: Data }) {
             <span className="insight-field">{FIELD_LABEL[i.field]} <span className="tone-icon" aria-label={i.tone === "good" ? "positive" : i.tone === "warn" ? "watch out" : "context"}>{i.tone === "good" ? "▲" : i.tone === "warn" ? "!" : "•"}</span></span>
             <h4>{i.title}</h4>
             <p className="insight-headline">{i.headline}</p>
-            <p className="insight-detail">{i.detail}</p>
+            {i.viz?.kind === "bars" && <MiniBars items={i.viz.items} />}
+            {i.viz?.kind === "ladder" && <PriceLadder costs={i.viz.costs} you={i.viz.you} />}
+            <ul className="facts">{i.facts.map((f) => <li key={f}>{f}</li>)}</ul>
+            <p className="move"><b>Marketing move:</b> {i.move}</p>
           </article>
         ))}
       </div>
@@ -337,6 +351,37 @@ function Planner({ data }: { data: Data }) {
       </div>
       <p className="caption">Top 8 areas by predicted popularity. Busy food hubs score high but are crowded; a slightly lower score with fewer competitors can be the better bet.</p>
     </section>
+  );
+}
+
+function MiniBars({ items }: { items: { label: string; value: number; mine: boolean }[] }) {
+  const max = Math.max(1, ...items.map((x) => x.value));
+  return (
+    <div className="minibars" role="img" aria-label="Restaurants by cuisine in this area">
+      {items.map((x) => (
+        <div key={x.label} className={x.mine ? "mb mine" : "mb"}>
+          <span className="mb-label">{x.label}</span>
+          <span className="mb-track"><span style={{ width: `${(x.value / max) * 100}%` }} /></span>
+          <span className="mb-val">{int(x.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PriceLadder({ costs, you }: { costs: number[]; you: number }) {
+  const maxCost = 2000, step = 100;
+  const bins = Array.from({ length: maxCost / step }, (_, i) => costs.filter((v) => v >= i * step && (i === maxCost / step - 1 ? true : v < (i + 1) * step)).length);
+  const peak = Math.max(1, ...bins);
+  const youBin = Math.min(bins.length - 1, Math.floor(you / step));
+  return (
+    <div className="ladder" role="img" aria-label={`Price distribution in this area with your price ${rupees(you)} marked`}>
+      <div className="ladder-bars">
+        {bins.map((n, i) => <span key={i} className={i === youBin ? "you" : ""} style={{ height: `${(n / peak) * 100}%` }} title={`${rupees(i * step)}–${rupees((i + 1) * step - 1)}: ${n} restaurants`} />)}
+      </div>
+      <div className="ladder-axis"><span>₹0</span><span>₹500</span><span>₹1,000</span><span>₹1,500</span><span>₹2,000+</span></div>
+      <span className="ladder-note">Restaurants in this area by cost for two · <b>you: {rupees(you)}</b></span>
+    </div>
   );
 }
 
