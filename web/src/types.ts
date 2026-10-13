@@ -79,7 +79,22 @@ export type Reviews = {
   by_type: Record<string, GroupThemes>;
 };
 
-export type Data = { market: Market; reviews: Reviews; model: ModelData };
+export type OsmArea = { lat: number; lon: number; total: number; previous: number | null; types: Record<string, number>; cuisines: Record<string, number>; tagged_share: number };
+
+export type Osm = {
+  fetched_at: string;
+  osm_data_time: string;
+  previous_fetched_at: string | null;
+  radius_km: number;
+  total: number;
+  types: Record<string, number>;
+  cuisines: Record<string, number>;
+  tagged_share: number;
+  areas: Record<string, OsmArea>;
+  attribution: string;
+};
+
+export type Data = { market: Market; reviews: Reviews; model: ModelData; osm: Osm | null };
 
 export type Concept = {
   area: string;

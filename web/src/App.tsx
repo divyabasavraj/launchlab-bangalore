@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { int, pct, rupees, stars } from "./format";
-import { buildInsights, changedField, describe, FIELD_LABEL, type Field } from "./insights";
+import { buildInsights, changedField, describe, FIELD_LABEL, liveDate, type Field } from "./insights";
 import { buildPlaybook, compareAreas } from "./playbook";
 import { predictPopular, predictRating } from "./predict";
 import type { Concept, Data } from "./types";
@@ -13,8 +13,9 @@ function useData() {
       if (!r.ok) throw new Error(`${n}.json: HTTP ${r.status}`);
       return r.json();
     });
-    Promise.all(["market", "reviews", "model"].map(get))
-      .then(([market, reviews, model]) => setData({ market, reviews, model }))
+    const osm = fetch("/data/osm.json").then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    Promise.all([...["market", "reviews", "model"].map(get), osm])
+      .then(([market, reviews, model, osmData]) => setData({ market, reviews, model, osm: osmData }))
       .catch((e) => setError(String(e)));
   }, []);
   return { data, error };
@@ -63,6 +64,7 @@ function Report({ data, dark, toggleTheme }: { data: Data; dark: boolean; toggle
       <main className="page">
         <section className="hero">
           <p className="kicker">{int(t.restaurants)} real Bangalore restaurants · {t.areas} areas · {int(data.reviews.n_reviews)} customer reviews</p>
+          {data.osm && <p className="live-badge"><i className="live-dot" />Live layer: {int(data.osm.total)} food places mapped on OpenStreetMap today ({liveDate(data.osm)}), refreshed weekly</p>}
           <h1>Opening a restaurant in Bangalore? <span className="accent">Predict how it will do</span> before you spend a rupee.</h1>
           <p className="lede">
             Machine-learning models trained on Zomato listings predict a new restaurant's rating and its chance of becoming popular,
@@ -87,7 +89,7 @@ function Report({ data, dark, toggleTheme }: { data: Data; dark: boolean; toggle
       <footer className="page footer">
         <p>
           Data: <a href="https://www.kaggle.com/datasets/himanshupoddar/zomato-bangalore-restaurants">Zomato Bangalore Restaurants</a> (Kaggle, a public snapshot of
-          Zomato listings from 2019). Independent student project, not affiliated with Zomato. Built with Python, scikit-learn, React.
+          Zomato listings from 2019). Live layer: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, ODbL. Independent student project, not affiliated with Zomato. Built with Python, scikit-learn, React.
         </p>
       </footer>
     </>
@@ -117,8 +119,8 @@ function Planner({ data }: { data: Data }) {
         before: [predictRating(m, c), predictPopular(m, c)], after: [predictRating(m, next), predictPopular(m, next)],
         why: field === "area" ? compareAreas(data.market, c, next) : undefined,
         ...(() => {
-          const a = buildPlaybook(data.market, m, c, data.reviews).actions.map((x) => x.title);
-          const b = buildPlaybook(data.market, m, next, data.reviews).actions.map((x) => x.title);
+          const a = buildPlaybook(data.market, m, c, data.reviews, data.osm).actions.map((x) => x.title);
+          const b = buildPlaybook(data.market, m, next, data.reviews, data.osm).actions.map((x) => x.title);
           return { added: b.filter((t) => !a.includes(t)), dropped: a.filter((t) => !b.includes(t)) };
         })(),
       });
@@ -126,9 +128,9 @@ function Planner({ data }: { data: Data }) {
     setC(next);
   };
   const set = (patch: Partial<Concept>) => update({ ...c, ...patch });
-  const insights = useMemo(() => buildInsights(data.market, data.reviews, c), [data.market, data.reviews, c]);
+  const insights = useMemo(() => buildInsights(data.market, data.reviews, c, data.osm), [data.market, data.reviews, c, data.osm]);
   const changedInsight = change ? insights.find((i) => i.field === change.field) : undefined;
-  const playbook = useMemo(() => buildPlaybook(data.market, m, c, data.reviews), [data.market, m, c, data.reviews]);
+  const playbook = useMemo(() => buildPlaybook(data.market, m, c, data.reviews, data.osm), [data.market, m, c, data.reviews, data.osm]);
   const toggleIn = (list: string[], v: string, max = 99) =>
     list.includes(v) ? list.filter((x) => x !== v) : list.length >= max ? list : [...list, v];
 
@@ -326,6 +328,12 @@ function Planner({ data }: { data: Data }) {
             {i.viz?.kind === "bars" && <MiniBars items={i.viz.items} />}
             {i.viz?.kind === "ladder" && <PriceLadder costs={i.viz.costs} you={i.viz.you} />}
             <ul className="facts">{i.facts.map((f) => <li key={f}>{f}</li>)}</ul>
+            {i.live && data.osm && (
+              <div className="live-block">
+                <span className="live-tag"><i className="live-dot" />Live today · OpenStreetMap · {liveDate(data.osm)}</span>
+                <ul>{i.live.map((f) => <li key={f}>{f}</li>)}</ul>
+              </div>
+            )}
             <p className="move"><b>Marketing move:</b> {i.move}</p>
           </article>
         ))}
@@ -335,7 +343,7 @@ function Planner({ data }: { data: Data }) {
       <p className="prose small">The same concept, predicted in every area. “Competitors” counts restaurants in that area already serving your cuisines.</p>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Area</th><th className="num">Chance popular</th><th className="num">Predicted rating</th><th className="num">Competitors</th><th className="num">Restaurants in area</th></tr></thead>
+          <thead><tr><th>Area</th><th className="num">Chance popular</th><th className="num">Predicted rating</th><th className="num">Competitors</th><th className="num">Restaurants in area</th>{data.osm && <th className="num">Mapped today ({data.osm.radius_km} km)</th>}</tr></thead>
           <tbody>
             {finder.map((r) => (
               <tr key={r.area} className={r.area === c.area ? "current" : ""}>
@@ -344,12 +352,13 @@ function Planner({ data }: { data: Data }) {
                 <td className="num">{stars(r.rating)}</td>
                 <td className="num">{int(r.competitors)} {r.crowded && <span className="tag">crowded</span>}</td>
                 <td className="num">{int(r.restaurants)}</td>
+                {data.osm && <td className="num">{data.osm.areas[r.area] ? int(data.osm.areas[r.area].total) : "–"}</td>}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="caption">Top 8 areas by predicted popularity. Busy food hubs score high but are crowded; a slightly lower score with fewer competitors can be the better bet.</p>
+      <p className="caption">Top 8 areas by predicted popularity. Busy food hubs score high but are crowded; a slightly lower score with fewer competitors can be the better bet. “Restaurants in area” is the 2019 Zomato count; “Mapped today” is the live OpenStreetMap count within {data.osm?.radius_km ?? 1.2} km of the area's centre, a different measure that isn't directly comparable.</p>
     </section>
   );
 }
@@ -623,13 +632,14 @@ function Method({ data }: { data: Data }) {
       <div className="grid3">
         <div><h3>Data</h3><p>51,717 Zomato listings collapsed to {int(data.market.totals.restaurants)} unique restaurants (a restaurant appears once per Zomato category). Ratings, cost and reviews parsed and cleaned in Python.</p></div>
         <div><h3>Models</h3><p>Gradient-boosted trees (scikit-learn) for rating (regression) and popularity (top 25% by votes, ≥{int(mt.popular_cut_votes)}), compared with linear/logistic models and simple baselines. Inputs are only pre-launch decisions; votes, reviews and “dishes liked” are excluded to avoid leakage.</p></div>
+        <div><h3>Live layer</h3><p>Every food place mapped in Bangalore is pulled from OpenStreetMap (Overpass API) and counted within {data.osm?.radius_km ?? 1.2} km of each area's geocoded centre, by type and cuisine. A scheduled job refreshes it weekly and redeploys the site.</p></div>
         <div><h3>Testing</h3><p>5-fold cross-validation grouped by brand. The browser runs the exact exported trees, checked against scikit-learn's own predictions.</p></div>
       </div>
       <h3>Limitations</h3>
       <ul className="limits">
         <li>Correlation, not causation: e.g. online ordering goes with more votes, but this data can't prove adding it causes them.</li>
         <li>Votes also grow with how long a restaurant has been open, and the data has no opening dates.</li>
-        <li>A 2019 snapshot of one city; Bangalore's market has changed since.</li>
+        <li>The models and most insights use a 2019 snapshot; the live OpenStreetMap layer shows today's density, but volunteer mapping is incomplete (only ~{pct(data.osm?.tagged_share ?? 0.45)} of places carry a cuisine tag), so treat its counts as minimums.</li>
         <li>Rating predictions are modest (±{mt.rating["Gradient boosting"].mae.toFixed(2)}★): use them to compare concepts, not as a promise.</li>
       </ul>
     </section>

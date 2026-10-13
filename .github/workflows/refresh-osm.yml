@@ -1,0 +1,29 @@
+name: Refresh live OpenStreetMap layer
+
+on:
+  schedule:
+    - cron: "30 2 * * 1" # every Monday, 08:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install certifi
+      - name: Fetch today's food places and recount per area
+        run: python -I analysis/osm.py
+      - name: Commit if anything changed (Vercel redeploys on push)
+        run: |
+          if git diff --quiet web/public/data/osm.json; then echo "No changes"; exit 0; fi
+          git config user.name "launchlab-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/public/data/osm.json
+          git commit -m "Refresh live OpenStreetMap layer"
+          git push

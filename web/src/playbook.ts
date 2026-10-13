@@ -1,7 +1,7 @@
-import { bandOf, FIX, gapCuisines, topComplaint } from "./insights";
+import { bandOf, FIX, gapCuisines, liveArea, topComplaint } from "./insights";
 import { int, pct, rupees, stars } from "./format";
 import { predictPopular, predictRating } from "./predict";
-import type { Area, Concept, Market, ModelData, Reviews } from "./types";
+import type { Area, Concept, Market, ModelData, Osm, Reviews } from "./types";
 
 type M = ModelData["model"];
 
@@ -47,7 +47,7 @@ export function compareAreas(mk: Market, from: Concept, to: Concept): string {
   return `${parts.join("; ")}. ${shift}`;
 }
 
-export function buildPlaybook(mk: Market, m: M, c: Concept, rv: Reviews): Playbook {
+export function buildPlaybook(mk: Market, m: M, c: Concept, rv: Reviews, osm: Osm | null = null): Playbook {
   const reviewLate = rv.themes.find((t) => t.theme.startsWith("Late delivery"))?.low ?? 0;
   const x = context(mk, c);
   const band = bandOf(c.cost);
@@ -60,7 +60,8 @@ export function buildPlaybook(mk: Market, m: M, c: Concept, rv: Reviews): Playbo
     `A ${x.position} ${c.type} place serving ${c.cuisines.join(" + ")} in ${c.area}: ` +
     `${x.crowded ? "a crowded market for these cuisines" : "moderate competition for these cuisines"}, ` +
     `${x.busy ? "with strong footfall" : "with below-average footfall"}. ` +
-    `Predicted ${stars(rating)} and a ${pct(pop)} chance of becoming popular (city average 25%).`;
+    `Predicted ${stars(rating)} and a ${pct(pop)} chance of becoming popular (city average 25%).` +
+    (() => { const L = liveArea(osm, c); return L ? ` Live today: ${int(L.a.total)} food places mapped within ${osm!.radius_km} km (#${L.rank} of ${L.of} areas).` : ""; })();
 
   const actions: Action[] = [];
   if (!c.online && on) {
@@ -89,6 +90,15 @@ export function buildPlaybook(mk: Market, m: M, c: Concept, rv: Reviews): Playbo
     actions.push({ priority: "Medium", title: "Protect delivery ratings: packaging and delivery time",
       why: `Late delivery or long waits show up in ${pct(reviewLate, 0)} of 1–2★ reviews. A bad first delivery costs more than any campaign earns back.` });
   }
+  const L = liveArea(osm, c);
+  if (L && L.rank <= 10) {
+    actions.push({ priority: "Medium", title: `Live data: ${c.area} is one of Bangalore's densest food hubs today`,
+      why: `OpenStreetMap shows ${int(L.a.total)} food places within ${osm!.radius_km} km (#${L.rank} of ${L.of} areas), led by ${L.top.slice(0, 2).map(([q]) => q).join(" and ")}. Customers here have endless choice: invest in a distinctive storefront and in being the first result for your dish on the apps.` });
+  } else if (L && L.rank > L.of - 15) {
+    actions.push({ priority: "Medium", title: `Live data: ${c.area} is thinly served today`,
+      why: `Only ${int(L.a.total)} food places are mapped within ${osm!.radius_km} km (#${L.rank} of ${L.of} areas). Less choice nearby means a good opening can become the local default: lean on neighbourhood marketing such as apartment communities, offices and flyers.` });
+  }
+
   // Cuisine-specific complaint: the most over-represented one across the chosen cuisines.
   const comp = c.cuisines.map((q) => ({ q, k: topComplaint(rv, "by_cuisine", q) })).filter((x) => x.k)
     .sort((a, b) => b.k!.lift - a.k!.lift)[0];

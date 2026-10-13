@@ -289,3 +289,12 @@ td small { color: var(--ink-3); }
 .cb { font-size: 12.5px; }
 .cb.add { color: var(--good-ink); }
 .cb.drop { color: var(--ink-3); text-decoration: line-through; }
+
+/* Live layer */
+.live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.5); animation: pulse 2s infinite; margin-right: 7px; vertical-align: 1px; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.45); } 70% { box-shadow: 0 0 0 7px rgba(12, 163, 12, 0); } 100% { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0); } }
+.live-badge { display: inline-block; font: 500 12.5px var(--mono); color: var(--good-ink); background: color-mix(in srgb, var(--good) 9%, transparent); border: 1px solid color-mix(in srgb, var(--good) 35%, transparent); border-radius: 999px; padding: 5px 12px; margin: -6px 0 22px; }
+.live-block { margin-top: 10px; padding: 9px 11px; border: 1px dashed color-mix(in srgb, var(--good) 45%, transparent); border-radius: 8px; }
+.live-tag { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: 0.05em; color: var(--good-ink); }
+.live-block ul { margin: 6px 0 0; padding-left: 16px; font-size: 12.5px; color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; line-height: 1.45; }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }

@@ -1,12 +1,12 @@
 import { int, pct, rupees, stars } from "./format";
-import type { Area, Concept, Market, Reviews } from "./types";
+import type { Area, Concept, Market, Osm, Reviews } from "./types";
 
 export type Field = "area" | "cuisines" | "type" | "cost" | "online" | "booking" | "outlets" | "listings";
 export type Tone = "good" | "warn" | "neutral";
 export type Viz =
   | { kind: "bars"; items: { label: string; value: number; mine: boolean }[] }
   | { kind: "ladder"; costs: number[]; you: number };
-export type Insight = { field: Field; title: string; headline: string; facts: string[]; move: string; tone: Tone; viz?: Viz; detail: string };
+export type Insight = { field: Field; title: string; headline: string; facts: string[]; move: string; tone: Tone; viz?: Viz; detail: string; live?: string[] };
 
 const BANDS: [number, number, string][] = [
   [0, 300, "Under ₹300"], [300, 500, "₹300–499"], [500, 800, "₹500–799"], [800, 1500, "₹800–1,499"], [1500, 1e9, "₹1,500+"],
@@ -77,7 +77,20 @@ export function gapCuisines(mk: Market, area: Area, exclude: string[]) {
     .slice(0, 3);
 }
 
-export function buildInsights(mk: Market, rv: Reviews, c: Concept): Insight[] {
+export const liveDate = (osm: Osm) => new Date(osm.osm_data_time || osm.fetched_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+
+/** Today's picture around an area from OpenStreetMap, ranked against the other areas. */
+export function liveArea(osm: Osm | null, c: Concept) {
+  const a = osm?.areas[c.area];
+  if (!osm || !a) return null;
+  const totals = Object.values(osm.areas).map((v) => v.total).sort((x, y) => y - x);
+  const rank = totals.indexOf(a.total) + 1;
+  const mine = c.cuisines.map((q) => ({ q, n: a.cuisines[q] ?? 0 }));
+  const top = Object.entries(a.cuisines).filter(([q]) => !q.startsWith("Indian (")).slice(0, 4);
+  return { a, rank, of: totals.length, mine, top };
+}
+
+export function buildInsights(mk: Market, rv: Reviews, c: Concept, osm: Osm | null = null): Insight[] {
   const city = mk.totals.mean_rating;
   const area = mk.areas.find((a) => a.area === c.area);
   const band = bandOf(c.cost);
@@ -111,6 +124,17 @@ export function buildInsights(mk: Market, rv: Reviews, c: Concept): Insight[] {
         : busy ? `Busy and not saturated: capture existing demand with promoted listings and storefront visibility at lunch and dinner peaks.`
           : `Quieter area: build demand with delivery to neighbouring areas, local Instagram creators and a first-order offer.`,
       tone: compRank >= 0.75 ? "warn" : busy ? "good" : "neutral",
+      live: (() => {
+        const L = liveArea(osm, c);
+        if (!L) return undefined;
+        return [
+          `${int(L.a.total)} food places mapped within ${osm!.radius_km} km of ${c.area}'s centre: #${L.rank} densest of ${L.of} areas${L.a.previous != null && L.a.previous !== L.a.total ? ` (${L.a.total > L.a.previous ? "▲ +" : "▼ "}${L.a.total - L.a.previous} since last refresh)` : ""}.`,
+          `Most-mapped cuisines nearby today: ${L.top.map(([q, n]) => `${q} ${n}`).join(", ")}.`,
+          `Your cuisines mapped nearby: ${L.mine.map((x) => `${x.q} ${x.n}`).join(", ")}` +
+            (c.cuisines.some((q) => q.includes("Indian")) && L.a.cuisines["Indian (unspecified)"] ? `, plus ${L.a.cuisines["Indian (unspecified)"]} tagged just “Indian”` : "") +
+            ` (only ${pct(L.a.tagged_share)} of places here have a cuisine tag, so these are minimums).`,
+        ];
+      })(),
       viz: { kind: "bars", items: [...topCuisines.map(([q, n]) => ({ label: q, value: n, mine: c.cuisines.includes(q) })),
         ...c.cuisines.filter((q) => !topCuisines.some(([t]) => t === q)).map((q) => ({ label: q, value: area.cuisine_counts[q] ?? 0, mine: true }))] },
       detail: "",
@@ -144,6 +168,7 @@ export function buildInsights(mk: Market, rv: Reviews, c: Concept): Insight[] {
       field: "cuisines", title: c.cuisines.join(" + "),
       headline: crowded.length ? `${crowded.map((x) => x.q).join(" and ")} ${crowded.length > 1 ? "are" : "is"} among Bangalore's most crowded cuisines` : `A less crowded cuisine mix`,
       facts, move, tone: crowded.length ? "warn" : "good", detail: "",
+      live: osm ? [`Mapped in Bangalore today: ${c.cuisines.map((q) => `${q} ${int(osm.cuisines[q] ?? 0)}`).join(", ")} (of ${int(osm.total)} food places; ${pct(osm.tagged_share)} carry a cuisine tag).`] : undefined,
     });
   }
 
