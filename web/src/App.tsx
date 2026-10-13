@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { int, pct, rupees, stars } from "./format";
+import { buildInsights, changedField, describe, FIELD_LABEL, type Field } from "./insights";
 import { predictPopular, predictRating } from "./predict";
 import type { Concept, Data } from "./types";
 
@@ -106,7 +107,20 @@ function Planner({ data }: { data: Data }) {
     area: defaultArea, cuisines: ["North Indian", "Chinese"], type: "Casual Dining", cost: 600,
     online: true, booking: false, outlets: 1, listings: ["Delivery", "Dine-out"],
   });
-  const set = (patch: Partial<Concept>) => setC({ ...c, ...patch });
+  const [change, setChange] = useState<{ n: number; field: Field; from: string; to: string; before: [number, number]; after: [number, number] } | null>(null);
+  const update = (next: Concept) => {
+    const field = changedField(c, next);
+    if (field) {
+      setChange({
+        n: (change?.n ?? 0) + 1, field, from: describe(field, c), to: describe(field, next),
+        before: [predictRating(m, c), predictPopular(m, c)], after: [predictRating(m, next), predictPopular(m, next)],
+      });
+    }
+    setC(next);
+  };
+  const set = (patch: Partial<Concept>) => update({ ...c, ...patch });
+  const insights = useMemo(() => buildInsights(data.market, c), [data.market, c]);
+  const changedInsight = change ? insights.find((i) => i.field === change.field) : undefined;
   const toggleIn = (list: string[], v: string, max = 99) =>
     list.includes(v) ? list.filter((x) => x !== v) : list.length >= max ? list : [...list, v];
 
@@ -197,6 +211,17 @@ function Planner({ data }: { data: Data }) {
         </form>
 
         <div className="result" aria-live="polite">
+          {change && (
+            <div className="change" key={change.n}>
+              <span className="change-kicker">Just changed · {FIELD_LABEL[change.field]}</span>
+              <span className="change-what">{change.from} → <b>{change.to}</b></span>
+              <span className="change-deltas">
+                <Delta label="Popularity" a={change.before[1]} b={change.after[1]} fmt={(v) => pct(v)} unit="pts" scale={100} />
+                <Delta label="Rating" a={change.before[0]} b={change.after[0]} fmt={stars} unit="★" scale={1} digits={2} />
+              </span>
+              {changedInsight && <span className="change-why">{changedInsight.detail}</span>}
+            </div>
+          )}
           <div className="result-main">
             <div>
               <span className="result-label">Predicted rating</span>
@@ -217,7 +242,7 @@ function Planner({ data }: { data: Data }) {
               const dp = l.popular - popular, dr = l.rating - rating;
               return (
                 <li key={l.label}>
-                  <button type="button" onClick={() => setC(l.concept)} title="Apply this change">{l.label}</button>
+                  <button type="button" onClick={() => update(l.concept)} title="Apply this change">{l.label}</button>
                   <span className={dp >= 0 ? "delta up" : "delta down"}>{dp >= 0 ? "▲" : "▼"} {Math.abs(dp * 100).toFixed(0)} pts popular</span>
                   <span className={dr >= 0 ? "delta up" : "delta down"}>{dr >= 0 ? "▲" : "▼"} {Math.abs(dr).toFixed(2)}★</span>
                 </li>
@@ -226,6 +251,19 @@ function Planner({ data }: { data: Data }) {
           </ul>
           <p className="result-note">Click a lever to apply it. These show how similar restaurants performed, which is useful for comparing options but not a guarantee that the change alone causes the result.</p>
         </div>
+      </div>
+
+      <h3 className="sub">Business insights for your choices</h3>
+      <p className="prose small">Live market context for every option, from the same 12,430 restaurants. Change anything above and these update.</p>
+      <div className="insights">
+        {insights.map((i) => (
+          <article key={`${i.field}-${change?.field === i.field ? change.n : 0}`} className={`insight ${i.tone} ${change?.field === i.field ? "flash" : ""}`}>
+            <span className="insight-field">{FIELD_LABEL[i.field]} <span className="tone-icon" aria-label={i.tone === "good" ? "positive" : i.tone === "warn" ? "watch out" : "context"}>{i.tone === "good" ? "▲" : i.tone === "warn" ? "!" : "•"}</span></span>
+            <h4>{i.title}</h4>
+            <p className="insight-headline">{i.headline}</p>
+            <p className="insight-detail">{i.detail}</p>
+          </article>
+        ))}
       </div>
 
       <h3 className="sub">Where should this concept open?</h3>
@@ -248,6 +286,16 @@ function Planner({ data }: { data: Data }) {
       </div>
       <p className="caption">Top 8 areas by predicted popularity. Busy food hubs score high but are crowded; a slightly lower score with fewer competitors can be the better bet.</p>
     </section>
+  );
+}
+
+function Delta({ label, a, b, fmt, unit, scale, digits = 0 }: { label: string; a: number; b: number; fmt: (v: number) => string; unit: string; scale: number; digits?: number }) {
+  const d = (b - a) * scale;
+  const flat = Math.abs(d) < (digits ? 0.005 : 0.5);
+  return (
+    <span className={flat ? "cd flat" : d > 0 ? "cd up" : "cd down"}>
+      {label} {fmt(a)} → <b>{fmt(b)}</b> <em>{flat ? "no change" : `${d > 0 ? "▲ +" : "▼ "}${d.toFixed(digits)} ${unit}`}</em>
+    </span>
   );
 }
 

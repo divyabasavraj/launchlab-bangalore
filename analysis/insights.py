@@ -67,15 +67,50 @@ def market(df: pd.DataFrame) -> dict:
         r = g[g.rating.notna()]
         if len(g) < 20:
             continue
+        by_c = r.explode("cuisines").groupby("cuisines").rating.agg(["mean", "size"])
         areas.append({
             "area": area, "restaurants": int(len(g)),
             "rating": float(r.rating.mean()) if len(r) else None,
             "median_votes": float(r.votes.median()) if len(r) else 0.0,  # demand proxy
             "median_cost": float(g.cost_for_two.median()),
+            "costs": sorted(int(v) for v in g.cost_for_two),  # to place a price within the area
+            "online_share": float(g.online_order.mean()),
+            "booking_share": float(g.book_table.mean()),
             "cuisine_counts": g.cuisines.explode().value_counts().to_dict(),
+            # rating of each cuisine within this area (only when there are enough places)
+            "cuisine_ratings": {c: round(float(v["mean"]), 2) for c, v in by_c.iterrows() if v["size"] >= 5},
         })
 
+    def stats(g: pd.DataFrame) -> dict:
+        gr = g[g.rating.notna()]
+        return {"restaurants": int(len(g)), "rating": float(gr.rating.mean()) if len(gr) else None,
+                "median_votes": float(gr.votes.median()) if len(gr) else 0.0,
+                "popular_share": float((gr.votes >= np.percentile(rated.votes, 75)).mean()) if len(gr) else 0.0,
+                "median_cost": float(g.cost_for_two.median()), "online_share": float(g.online_order.mean()),
+                "areas": int(g.area.nunique())}
+
+    by_c_all = df.explode("cuisines")
+    cuisine_stats = {c: stats(g) for c, g in by_c_all.groupby("cuisines") if len(g) >= 30}
+    by_t_all = df.explode("rest_types")
+    type_stats = {t: stats(g) for t, g in by_t_all.groupby("rest_types") if len(g) >= 30}
+    by_l_all = df.explode("listed_in")
+    listing_stats = {l: stats(g) for l, g in by_l_all.groupby("listed_in")}
+
+    # Table booking and chain size, compared within the same price band.
+    booking = []
+    for b in order:
+        g = rated[rated.band == b]
+        on, off = g[g.book_table == 1], g[g.book_table == 0]
+        booking.append({"band": b, "share": float(g.book_table.mean()),
+                        "with": float(on.rating.mean()) if len(on) >= 20 else None,
+                        "without": float(off.rating.mean()) if len(off) >= 20 else None,
+                        "votes_with": float(on.votes.median()) if len(on) >= 20 else None,
+                        "votes_without": float(off.votes.median()) if len(off) >= 20 else None})
+
     return {
+        "cuisine_stats": cuisine_stats, "type_stats": type_stats, "listing_stats": listing_stats,
+        "booking": booking,
+        "popular_share_overall": 0.25,
         "totals": {"restaurants": int(len(df)), "rated": int(len(rated)), "areas": int(df.area.nunique()),
                    "median_cost": float(df.cost_for_two.median()), "mean_rating": float(rated.rating.mean()),
                    "online_share": float(df.online_order.mean()), "chains_share": float((df.outlets > 1).mean())},

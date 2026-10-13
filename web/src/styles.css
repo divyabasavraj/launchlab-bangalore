@@ -203,3 +203,31 @@ td small { color: var(--ink-3); }
 .dot-axis { position: relative; height: 16px; font: 10.5px var(--mono); color: var(--ink-3); }
 .dot-axis span { position: absolute; transform: translateX(-50%); }
 .result-note { font-size: 12px; color: var(--ink-3); margin: 12px 0 0; }
+
+/* Live change banner */
+.change { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; margin-bottom: 18px; background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--accent); border-radius: 10px; animation: pop 0.35s ease; }
+.change-kicker { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); }
+.change-what { font-size: 15px; }
+.change-deltas { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); }
+.cd b { color: var(--ink); font-family: var(--mono); font-weight: 500; }
+.cd em { font: 500 12px var(--mono); font-style: normal; margin-left: 4px; }
+.cd.up em { color: var(--good-ink); }
+.cd.down em { color: var(--critical); }
+.cd.flat em { color: var(--ink-3); }
+.change-why { font-size: 13px; color: var(--ink-2); line-height: 1.5; }
+@keyframes pop { from { transform: translateY(-4px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Insight cards */
+.insights { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.insight { background: var(--surface); border: 1px solid var(--rule); border-top: 3px solid var(--muted-series); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.insight.good { border-top-color: var(--good); }
+.insight.warn { border-top-color: var(--series-2); }
+.insight.flash { animation: flash 1.2s ease; box-shadow: 0 0 0 2px var(--accent); }
+@keyframes flash { 0% { background: var(--accent-soft); } 100% { background: var(--surface); } }
+.insight-field { display: flex; justify-content: space-between; font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-3); }
+.tone-icon { font-size: 12px; }
+.insight.good .tone-icon { color: var(--good-ink); }
+.insight.warn .tone-icon { color: var(--series-2); }
+.insight h4 { margin: 2px 0 0; font: 600 15px var(--sans); }
+.insight-headline { margin: 0; font: 12px/1.5 var(--mono); color: var(--ink-2); }
+.insight-detail { margin: 4px 0 0; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }

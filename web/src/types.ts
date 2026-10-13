@@ -27,7 +27,21 @@ export type Area = {
   rating: number | null;
   median_votes: number;
   median_cost: number;
+  costs: number[];
+  online_share: number;
+  booking_share: number;
   cuisine_counts: Record<string, number>;
+  cuisine_ratings: Record<string, number>;
+};
+
+export type GroupStats = {
+  restaurants: number;
+  rating: number | null;
+  median_votes: number;
+  popular_share: number;
+  median_cost: number;
+  online_share: number;
+  areas: number;
 };
 
 export type Market = {
@@ -45,6 +59,10 @@ export type Market = {
   by_chain: { kind: string; restaurants: number; rating: number; median_votes: number }[];
   by_cuisine: { cuisines: string; restaurants: number; rating: number; median_votes: number; cost: number }[];
   areas: Area[];
+  cuisine_stats: Record<string, GroupStats>;
+  type_stats: Record<string, GroupStats>;
+  listing_stats: Record<string, GroupStats>;
+  booking: { band: string; share: number; with: number | null; without: number | null; votes_with: number | null; votes_without: number | null }[];
 };
 
 export type Reviews = {
