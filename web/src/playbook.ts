@@ -1,4 +1,4 @@
-import { bandOf, FIX, gapCuisines, liveArea, topComplaint } from "./insights";
+import { bandOf, FIX, footfall, gapCuisines, liveArea, topComplaint } from "./insights";
 import { int, pct, rupees, stars } from "./format";
 import { predictPopular, predictRating } from "./predict";
 import type { Area, Concept, Market, ModelData, Osm, Reviews } from "./types";
@@ -18,11 +18,12 @@ function context(mk: Market, c: Concept) {
   const competitors = competitorsIn(area, c);
   const crowded = competitors >= [...comps].sort((a, b) => a - b)[Math.floor(comps.length * 0.75)];
   const cityVotes = median(mk.areas.map((a) => a.median_votes));
-  const busy = (area?.median_votes ?? 0) >= cityVotes;
+  const foot = footfall(area?.median_votes ?? 0, cityVotes);
+  const busy = foot === "busy";
   const cheaperThan = area ? area.costs.filter((v) => v > c.cost).length / area.costs.length : 0.5;
   const position = cheaperThan >= 0.6 ? "value" : cheaperThan <= 0.25 ? "premium" : "mid-market";
   const crowdedCuisines = c.cuisines.filter((q) => (mk.cuisine_stats[q]?.restaurants ?? 0) >= 1500);
-  return { area, competitors, crowded, cityVotes, busy, cheaperThan, position, crowdedCuisines };
+  return { area, competitors, crowded, cityVotes, busy, foot, cheaperThan, position, crowdedCuisines };
 }
 
 /** Plain-English comparison when the owner moves the concept to another area. */
@@ -33,7 +34,7 @@ export function compareAreas(mk: Market, from: Concept, to: Concept): string {
   const parts = [
     `${to.area} has ${int(b.competitors)} restaurants serving your cuisines vs ${int(a.competitors)} in ${from.area}` +
       (Math.abs(compChange) >= 0.15 ? ` (${compChange < 0 ? "" : "+"}${Math.round(compChange * 100)}%)` : ""),
-    `footfall ${b.busy === a.busy ? (b.area.median_votes >= a.area.median_votes ? "higher" : "lower") : b.busy ? "much higher" : "much lower"} (${int(b.area.median_votes)} vs ${int(a.area.median_votes)} median votes)`,
+    `footfall ${b.area.median_votes >= a.area.median_votes ? "higher" : "lower"} (${int(b.area.median_votes)} vs ${int(a.area.median_votes)} median votes; ${b.foot === "busy" ? "busy" : b.foot === "quiet" ? "quiet" : "about average"} for Bangalore)`,
     a.position === b.position ? `your ${rupees(to.cost)} price is ${b.position} here, same as in ${from.area}` : `your ${rupees(to.cost)} price reads as ${b.position} here (was ${a.position})`,
   ];
   const footChange = a.area.median_votes ? (b.area.median_votes - a.area.median_votes) / a.area.median_votes : 0;
@@ -59,7 +60,7 @@ export function buildPlaybook(mk: Market, m: M, c: Concept, rv: Reviews, osm: Os
   const situation =
     `A ${x.position} ${c.type} place serving ${c.cuisines.join(" + ")} in ${c.area}: ` +
     `${x.crowded ? "a crowded market for these cuisines" : "moderate competition for these cuisines"}, ` +
-    `${x.busy ? "with strong footfall" : "with below-average footfall"}. ` +
+    `${x.foot === "busy" ? "with strong footfall" : x.foot === "quiet" ? "with below-average footfall" : "with about-average footfall"}. ` +
     `Predicted ${stars(rating)} and a ${pct(pop)} chance of becoming popular (city average 25%).` +
     (() => { const L = liveArea(osm, c); return L ? ` Live today: ${int(L.a.total)} food places mapped within ${osm!.radius_km} km (#${L.rank} of ${L.of} areas).` : ""; })();
 
@@ -72,12 +73,15 @@ export function buildPlaybook(mk: Market, m: M, c: Concept, rv: Reviews, osm: Os
     actions.push({ priority: "High", title: "Differentiate: lead every campaign with one signature dish",
       why: `${int(x.competitors)} restaurants in ${c.area} already serve ${c.cuisines.join(" or ")}${x.crowdedCuisines.length ? `, and ${x.crowdedCuisines.join(" and ")} ${x.crowdedCuisines.length > 1 ? "are" : "is"} among Bangalore's most crowded cuisines` : ""}. Generic menus get lost; a named hero item gives customers a reason to choose you.` });
   }
-  if (x.busy) {
+  if (x.foot === "busy") {
     actions.push({ priority: x.crowded ? "Medium" : "High", title: `Capture existing demand in ${c.area}`,
       why: `A typical restaurant here gets ${int(x.area?.median_votes ?? 0)} votes vs ${int(x.cityVotes)} in a typical area. Spend on promoted Zomato listings and storefront visibility at lunch and dinner peaks, where the traffic already is.` });
-  } else {
+  } else if (x.foot === "quiet") {
     actions.push({ priority: "High", title: "Create demand: footfall here is below average",
       why: `A typical restaurant here gets ${int(x.area?.median_votes ?? 0)} votes vs ${int(x.cityVotes)} citywide. Widen reach with delivery to neighbouring areas, local Instagram creators and a launch offer for first orders.` });
+  } else {
+    actions.push({ priority: "Medium", title: `Build steady local demand in ${c.area}`,
+      why: `Traffic here is about average (${int(x.area?.median_votes ?? 0)} median votes vs ${int(x.cityVotes)} citywide). Split effort between app visibility (photos, promoted listings) and word of mouth from nearby offices and apartments.` });
   }
   if (x.position === "value") {
     actions.push({ priority: "Medium", title: "Message value: “meal for two under " + rupees(Math.ceil(c.cost / 50) * 50 + 50) + "”",

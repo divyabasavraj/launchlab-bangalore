@@ -77,6 +77,11 @@ export function gapCuisines(mk: Market, area: Area, exclude: string[]) {
     .slice(0, 3);
 }
 
+/** Footfall vs the typical Bangalore area: only clearly busy or clearly quiet areas get a label. */
+export function footfall(votes: number, cityVotes: number): "busy" | "average" | "quiet" {
+  return votes >= cityVotes * 1.3 ? "busy" : votes <= cityVotes * 0.8 ? "quiet" : "average";
+}
+
 export const liveDate = (osm: Osm) => new Date(osm.osm_data_time || osm.fetched_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
 /** Today's picture around an area from OpenStreetMap, ranked against the other areas. */
@@ -102,7 +107,8 @@ export function buildInsights(mk: Market, rv: Reviews, c: Concept, osm: Osm | nu
     const competitors = c.cuisines.reduce((s, q) => s + (area.cuisine_counts[q] ?? 0), 0);
     const allComp = mk.areas.map((a) => c.cuisines.reduce((s, q) => s + (a.cuisine_counts[q] ?? 0), 0)).sort((x, y) => x - y);
     const compRank = allComp.filter((v) => v < competitors).length / allComp.length;
-    const busy = area.median_votes >= cityVotes;
+    const foot = footfall(area.median_votes, cityVotes);
+    const busy = foot === "busy";
     const topCuisines = Object.entries(area.cuisine_counts).sort((a, b) => b[1] - a[1]).slice(0, 6);
     const topTypes = Object.entries(area.type_counts).sort((a, b) => b[1] - a[1]).slice(0, 3);
     const bestHere = Object.entries(area.cuisine_ratings).filter(([q]) => (area.cuisine_counts[q] ?? 0) >= 5)
@@ -113,7 +119,7 @@ export function buildInsights(mk: Market, rv: Reviews, c: Concept, osm: Osm | nu
       headline: `${int(area.restaurants)} restaurants · ${stars(area.rating ?? city)} average · ${rupees(area.median_cost)} typical for two`,
       facts: [
         `Already here: ${c.cuisines.map((q) => `${int(area.cuisine_counts[q] ?? 0)} ${q}`).join(", ")}${compRank >= 0.75 ? ", one of the most crowded areas for your cuisines" : compRank <= 0.35 ? ", a relatively open market for your cuisines" : ""}.`,
-        `Footfall: a typical restaurant here has ${int(area.median_votes)} votes vs ${int(cityVotes)} in a typical Bangalore area (${busy ? "busy" : "quieter"}).`,
+        `Footfall: a typical restaurant here has ${int(area.median_votes)} votes vs ${int(cityVotes)} in a typical Bangalore area (${foot === "busy" ? "busy" : foot === "quiet" ? "quieter" : "about average"}).`,
         `Mostly ${topTypes.map(([t, n]) => `${t} (${pct(share(n, area.restaurants))})`).join(", ")}.`,
         bestHere.length ? `Best-rated cuisines here: ${bestHere.map(([q, r]) => `${q} ${stars(r)}`).join(", ")}.` : "",
         gaps.length ? `Gaps: ${gaps.map((g) => g.q).join(", ")} ${gaps.length > 1 ? "are" : "is"} under-represented here compared with the rest of Bangalore, and rate above average.` : "",
@@ -122,7 +128,8 @@ export function buildInsights(mk: Market, rv: Reviews, c: Concept, osm: Osm | nu
       move: compRank >= 0.75
         ? `Crowded for your cuisines: geo-target Zomato ads to ${c.area} and lead with a dish none of the ${int(competitors)} competitors offer${gaps.length ? `, or add a ${gaps[0].q} item to fill a local gap` : ""}.`
         : busy ? `Busy and not saturated: capture existing demand with promoted listings and storefront visibility at lunch and dinner peaks.`
-          : `Quieter area: build demand with delivery to neighbouring areas, local Instagram creators and a first-order offer.`,
+          : foot === "quiet" ? `Quieter area: build demand with delivery to neighbouring areas, local Instagram creators and a first-order offer.`
+            : `Average traffic: split effort between app visibility (promoted listings, photos) and local word of mouth.`,
       tone: compRank >= 0.75 ? "warn" : busy ? "good" : "neutral",
       live: (() => {
         const L = liveArea(osm, c);
